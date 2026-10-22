@@ -11,8 +11,6 @@ import com.iolite.kpcamera.attendance.model.responses.RoomResDto;
 
 public interface RoomDao {
 	
-	List<RoomReqDto> getRoomMaster(int id) throws Exception;
-
 	void saveRoom(RoomResDto roomResDto, int id, String orgLocId, String org_facility_id);
 	
 	Map<String, String> getAwsRoomIds(int id) throws Exception;
@@ -28,6 +26,5 @@ public interface RoomDao {
 	RoomIpOutbound getRoom(RoomIpInbound roomIpInbound);
 	
 	String getMegBoxIpByCameraIp(String cameraIp);
-
 
 }

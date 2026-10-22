@@ -1,6 +1,7 @@
 package com.iolite.kpcamera.attendance.dao;
 
 import java.util.List;
+import java.util.Map;
 
 import com.iolite.kpcamera.attendance.model.AttendanceReqestModel;
 import com.iolite.kpcamera.attendance.model.responses.StudentApkDtoResponse;
@@ -33,4 +34,18 @@ public interface AttendanceDao {
 	 
 	 void saveAbsentBackup(String status, String fileName, String fileContent);
 
+	 List<StudentApkDtoResponse> getLatestSessionForCamera(
+		        String cameraIp, String startDate);
+	 void saveChristDeliveryLog(
+		        String cameraIp,
+		        String dateandtime,
+		        String requestPayload,
+		        String responseStatus,
+		        String responseBody);
+	 
+	 
+	 void saveRecognitionEvidence(List<Object[]> rows);
+
+	 List<Map<String, Object>> getEvidenceForStudent(
+	         String studentId, String startDate, String hourLike);
 }

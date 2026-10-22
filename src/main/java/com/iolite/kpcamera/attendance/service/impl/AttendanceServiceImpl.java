@@ -27,7 +27,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -44,6 +46,7 @@ import com.google.firebase.messaging.AndroidNotification;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
+import com.iolite.kpcamera.attendance.configure.RestTemplateConfiguration;
 import com.iolite.kpcamera.attendance.dao.AttendanceDao;
 import com.iolite.kpcamera.attendance.dao.MegboxStudentDetailsDao;
 import com.iolite.kpcamera.attendance.dao.StudentDetailsDao;
@@ -82,8 +85,6 @@ public class AttendanceServiceImpl implements AttendanceService {
 	@Autowired
     AttendanceService attendanceService;
 	
-	@Autowired
-	private StudentDetailsDao studentDao;
 	
 	@Value("${andriod.attendance.submit.url}")
 	private String submitAttendanceUrl;
@@ -244,7 +245,50 @@ public class AttendanceServiceImpl implements AttendanceService {
 //		return response;
 //	}
 //	
-//	//RoomId - cameraIp Modification
+//	
+	
+	
+	// Best (highest score) capture for one student in one session
+	private static class EvidenceRow {
+	    String studentId;
+	    double score;
+	    String recognizedAt;
+	    String captureUrl;
+	    String fullUrl;
+	    String trackId;
+	}
+
+	private static String toFullUrl(String raw, String megBoxIp) {
+	    if (raw == null) {
+	        return null;
+	    }
+	    // Same URL handling as getStudentAttendanceForUI (leading "." -> https://box-ip)
+	    return raw.startsWith(".") ? "https://" + megBoxIp + raw.substring(1) : raw;
+	}
+
+	// ALL the getters I couldn't confirm are in this one method.
+	private void collectBestEvidence(Map<String, EvidenceRow> best, String alertKey,
+	        AlertsEvent alert, Top1 top1, String megBoxIp) {
+	    try {
+	        double score = Double.parseDouble(String.valueOf(top1.getSearchScore()));
+	        EvidenceRow current = best.get(alertKey);
+	        if (current == null || score > current.score) {
+	            EvidenceRow row = new EvidenceRow();
+	            row.studentId = top1.getDescription();
+	            row.score = score;
+	            row.recognizedAt = String.valueOf(alert.getTimestamp());
+	            row.captureUrl = toFullUrl(alert.getCaptureImageURL(), megBoxIp);
+	            row.fullUrl = toFullUrl(alert.getCaptureFullImageURL(), megBoxIp);
+	            row.trackId = String.valueOf(alert.getTrackId());
+	            best.put(alertKey, row);
+	        }
+	    } catch (Exception e) {
+	        // Evidence must never break attendance
+	        lg.warn("Could not collect evidence for {}: {}", alertKey, e.getMessage());
+	    }
+	}
+	
+	//RoomId - cameraIp Modification
 	@Override
 	public StudentAttendanceDetailsResponse
 	        getStudentAttendance(
@@ -303,6 +347,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
 	        List<String> duplicateStudentList =
 	                new ArrayList<>();
+	        Map<String, EvidenceRow> bestEvidence = new HashMap<>();
 
 	        List<RecongnizedStudentResDto> facesResDtoList =
 	                service.getRecongnizedData(
@@ -368,6 +413,11 @@ public class AttendanceServiceImpl implements AttendanceService {
 	                    lg.info("alertKey: {}, mapContainsKey: {}",
 	                            alertKey,
 	                            map.containsKey(alertKey));
+	                    if (groupName.equalsIgnoreCase(alertGroupName)
+	                            && map.containsKey(alertKey)) {
+	                        collectBestEvidence(bestEvidence, alertKey, alert, top1,
+	                                studentApkDtoResponse.getMegBoxIp());
+	                    }
 
 	                    if (groupName.equalsIgnoreCase(
 	                                alertGroupName)
@@ -433,6 +483,19 @@ public class AttendanceServiceImpl implements AttendanceService {
 	                    duplicateStudentList.add(data.getKey());
 	                }
 	            }
+	        }
+	     // Save best capture per student as proof (never affects the main flow)
+	        try {
+	            List<Object[]> evidenceRows = new ArrayList<>();
+	            for (EvidenceRow r : bestEvidence.values()) {
+	                evidenceRows.add(new Object[] {
+	                        r.studentId, cameraIp, startTime, r.recognizedAt,
+	                        r.score, r.captureUrl, r.fullUrl, r.trackId });
+	            }
+	            dao.saveRecognitionEvidence(evidenceRows);
+	            lg.info("Recognition evidence saved: {} students", evidenceRows.size());
+	        } catch (Exception evEx) {
+	            lg.error("Failed to save recognition evidence: {}", evEx.getMessage());
 	        }
 
 	        // ← NEW: Save absent students backup
@@ -599,26 +662,6 @@ public class AttendanceServiceImpl implements AttendanceService {
 	            getNewGetAttId(response);
 	        }
 
-	        List<AttendanceReqestModel> attendanceList =
-	                new ArrayList<>();
-	        try {
-	            attendanceList =
-	                    studentDao.getTeacherMarkedAttendanceData(
-	                            studentApkDtoResponse);
-	            lg.info("attendanceList {}", attendanceList);
-	        } catch (Exception ex) {
-	            lg.warn("getTeacherMarkedAttendanceData failed " +
-	                    "(table may not exist locally): {}",
-	                    ex.getMessage());
-	        }
-
-	        if (studentCameraCapturedMap != null &&
-	                !studentCameraCapturedMap.isEmpty()) {
-	            service.convertCSVFile(
-	                    attendanceList,
-	                    studentCameraCapturedMap);
-	        }
-
 	    } catch (Exception e) {
 	        lg.error("Error in getStudentAttendance", e);
 	    }
@@ -705,7 +748,11 @@ for (StudentApkDtoResponse studentAttendance :
             studentAttendance.getTeacherName());
     model.setClassId(
             studentAttendance.getClassId());
-    model.setIsRecongStudent("200");
+    model.setIsRecongStudent(
+    	    "300".equals(studentAttendance.getIsRecongStudent())
+    	        ? "300"
+    	        : "200"
+    	);
     model.setPeriodId(
             studentAttendance.getPeriodId());
     model.setMegBoxIp(
@@ -890,21 +937,6 @@ return map;
 	                    data.getCameraIp() + "@" +
 	                    data.getStartTime();
 
-	            // Check MegBox alive
-	            if (!CameraUtils.isIPActive(
-	                    data.getMegBoxIp())) {
-	                HttpEntity<FCMReqDto> request =
-	                        CameraUtils.sendNotification(
-	                                data,
-	                                OrganizationUtil
-	                                    .SEND_ERROR_NOTIFICATION);
-	                restTemplate.postForEntity(
-	                        "http://203.192.241.142:3000/" +
-	                        "send-notifications",
-	                        request,
-	                        String.class);
-	            }
-
 	            int result = dateTime.compareTo(
 	                    attendanceCapturedEndTime);
 
@@ -930,10 +962,6 @@ return map;
 	private void sendNotification(StudentApkDtoResponse data, String roomSubInfo, String roomSubIds, Date teacherSubmittedTime, Date attendanceCapturedEndTime) {
 		duplicateData.add(roomSubInfo);
 		attendanceService.getStudentAttendance(roomSubIds, teacherSubmittedTime, attendanceCapturedEndTime);
-		// sendNotificationBasedOnSchdule(data, HoursAndMints);
-		HttpEntity<FCMReqDto> request = CameraUtils.sendNotification(data, OrganizationUtil.SEND_SUCCESS_NOTIFICATION);
-		restTemplate.postForEntity("http://203.192.241.142:3000/send-notifications", request,
-				String.class);
 	}
 
 	@Override
@@ -976,89 +1004,109 @@ return map;
 				.setNotification(AndroidNotification.builder().setTag(topic).build()).build();
 	}
 
-	public String getNewGetAttId(
-	        StudentAttendanceDetailsResponse response)
-	        throws SQLException {
-
-	    Integer attendanceIdId = null;
+	private void getNewGetAttId(
+	        StudentAttendanceDetailsResponse response) {
 	    try {
-	        StringBuilder nameValuePairs =
-	                new StringBuilder();
-	        nameValuePairs.append("&subId=" +
-	                response.getSubjectId());
-	        nameValuePairs.append("&attDate=" +
-	                response.getAttDate());
-	        nameValuePairs.append("&hoursheld=" +
-	                response.getHoursheld());
-	        nameValuePairs.append("&dateandtime=" +
-	                response.getDateandtime());
-	        nameValuePairs.append("&attTypeId=" +
-	                response.getAttTypeId());
-	        nameValuePairs.append("&batchId=" +
-	                response.getBatchId());
-	        nameValuePairs.append("&workDiaryActivityId=" +
-	                response.getWorkDiaryActivityId());
-	        nameValuePairs.append("&totalHours=" +
-	                response.getTotalHours());
-	        nameValuePairs.append("&activityId=" +
-	                response.getActivityId());
-	        nameValuePairs.append("&userId=" +
-	                response.getUserId());
-	        String isTTInt = Boolean.parseBoolean(
-	                response.getIsTT()) ? "1" : "0";
-	        nameValuePairs.append("&isTT=" + isTTInt);
-	        nameValuePairs.append("&version=" +
-	                response.getVersion());
-	        nameValuePairs.append("&classArray=" +
-	                response.getClassId());
-	        nameValuePairs.append("&periodArray=" +
-	                response.getPeriodId());
-	        nameValuePairs.append("&teacherArray=" +
-	                response.getTecherId());
-	        nameValuePairs.append("&substitueClass=" +
-	                response.getSubstitueClass());
-	        nameValuePairs.append("&startTime=" +
-	                response.getStartTime());
-	        nameValuePairs.append("&endTime=" +
-	                response.getEndTime());
-	        nameValuePairs.append("&workDiaryAcademicYear=" +
-	                response.getWorkDiaryAcademicYear());
+	        Map<String, Object> payload = new HashMap<>();
 
-	        StringBuilder students = new StringBuilder();
+	        // ← CHANGED: dateandtime + cameraIpAddress instead of
+	        // date/startTime/endTime. Both values already flow
+	        // through this response object from getStudentAttendance
+	        // (response.setDateandtime(...) / response.setCameraIp(...))
+	        // — no upstream changes needed for these to be populated.
+	        payload.put("dateandtime", response.getDateandtime());
+	        payload.put("cameraIpAddress", response.getCameraIp());
 
-	        for (StudentAttendanceDetails details :
-	                response.getStudentAttendanceDetails()) {
+	        List<Map<String, Object>> studentList =
+	                new ArrayList<>();
 
-	            // ← CHANGED: handle 300 (unknown)
-	            String recongFlag;
-	            if ("100".equals(
-	                    details.getIsRecongStudent())) {
-	                recongFlag = "1";   // Present
-	            } else if ("300".equals(
-	                    details.getIsRecongStudent())) {
-	                recongFlag = "3";   // Unknown (no photo)
-	            } else {
-	                recongFlag = "0";   // Absent
+	        if (response.getStudentAttendanceDetails() != null) {
+	            for (StudentAttendanceDetails details :
+	                    response.getStudentAttendanceDetails()) {
+
+	                Map<String, Object> studentEntry =
+	                        new HashMap<>();
+	                studentEntry.put(
+	                        "studentId",
+	                        details.getStudentId());
+
+	                String status;
+	                if ("100".equals(
+	                        details.getIsRecongStudent())) {
+	                    status = "PRESENT";
+	                } else if ("300".equals(
+	                        details.getIsRecongStudent())) {
+	                    status = "UNKNOWN";
+	                } else {
+	                    status = "ABSENT";
+	                }
+	                studentEntry.put("status", status);
+	                studentList.add(studentEntry);
 	            }
-
-	            students.append(details.getStudentId())
-	                    .append(",")
-	                    .append(recongFlag)
-	                    .append(",")
-	                    .append(details.getIsOnleave())
-	                    .append(",")
-	                    .append(details.getIsCocurricularLeave())
-	                    .append("__");
 	        }
 
-	        String studentsStr = students.toString();
-	        callNewGetAttId(nameValuePairs, studentsStr);
+	        payload.put("students", studentList);
 
-	    } catch (Exception ex) {
-	        ex.printStackTrace();
+	        HttpHeaders headers = new HttpHeaders();
+	        headers.setContentType(MediaType.APPLICATION_JSON);
+
+	        HttpEntity<Map<String, Object>> requestEntity =
+	                new HttpEntity<>(payload, headers);
+
+	        RestTemplate restTemplate =
+	                RestTemplateConfiguration.getRestTemplate();
+
+	        // ← CHANGED: capture the serialized JSON in a variable
+	        // so it can be reused for the delivery log below,
+	        // instead of serializing inline only for the log line
+	        String requestJson =
+	                new ObjectMapper().writeValueAsString(payload);
+
+	        lg.info("Sending attendance results to Christ App: {}",
+	                requestJson);
+
+	        ResponseEntity<String> christResponse =
+	                restTemplate.exchange(
+	                        submitAttendanceUrl,
+	                        HttpMethod.POST,
+	                        requestEntity,
+	                        String.class);
+
+	        lg.info("Christ App response: {} - {}",
+	                christResponse.getStatusCode(),
+	                christResponse.getBody());
+
+	        // ← NEW: log this delivery for proof purposes.
+	        // Fires for EVERY session (absentees or not), unlike
+	        // absent_student_backup which only fires when there
+	        // are absent students.
+	        dao.saveChristDeliveryLog(
+	                response.getCameraIp(),
+	                response.getDateandtime(),
+	                requestJson,
+	                String.valueOf(
+	                        christResponse.getStatusCode().value()),
+	                christResponse.getBody());
+
+	    } catch (Exception e) {
+	        lg.error("Error sending results to Christ App: {}",
+	                e.getMessage());
+
+	        // ← NEW: also log failed delivery attempts — proof
+	        // that we tried, even if the call itself failed
+	        // (network error, timeout, etc.)
+	        try {
+	            dao.saveChristDeliveryLog(
+	                    response.getCameraIp(),
+	                    response.getDateandtime(),
+	                    "N/A",
+	                    "ERROR",
+	                    e.getMessage());
+	        } catch (Exception logEx) {
+	            lg.error("Failed to log delivery failure: {}",
+	                    logEx.getMessage());
+	        }
 	    }
-	    return attendanceIdId != null
-	            ? attendanceIdId.toString() : "";
 	}
 
 	@Override
@@ -1100,7 +1148,7 @@ return map;
 		return attendanceReqList;
 }
 	
-
+  // unused
 	public String callNewGetAttId(StringBuilder nameValuePairs, String students) throws Exception {
 
 		

@@ -97,6 +97,10 @@ import com.iolite.kpcamera.attendance.model.responses.Video;
 import com.iolite.kpcamera.attendance.util.CameraUtils;
 import com.iolite.kpcamera.attendance.util.OrganizationUtil;
 import com.opencsv.CSVWriter;
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+
+
 
 import io.grpc.netty.shaded.io.netty.handler.timeout.TimeoutException;
 
@@ -185,6 +189,10 @@ public class MegBoxAttendanceService {
 	private static String orgId = "ChristMysore";
 	private static String megBoxProtocal = "http://";
 	private static String megBoxUri= "/v1/MEGBOX/";
+	
+	private CloseableHttpClient megBoxHttpClient;
+	private RestTemplate megBoxBindingTemplate;
+
 	
 	
 	@Scheduled(cron = OrganizationUtil.ORG_SCHEDULE_TIME)
@@ -802,47 +810,47 @@ public class MegBoxAttendanceService {
 	}
 
 	//@Scheduled(cron = OrganizationUtil.ORG_GROUP_CREATION_SCHEDULE_TIME)
-	public void createGroups() throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
-		Integer orgId = 1;
-		ResponseEntity response = null;
-		PoolingHttpClientConnectionManager cm  = null;
-		try { 
-			List<RoomReqDto> dtoList = roomDao.getRoomMaster(orgId);
-			for(RoomReqDto dto : dtoList) {
-				SSLContextBuilder builder = new SSLContextBuilder();
-				builder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
-				SSLConnectionSocketFactory sslConnectionSocketFactory = new SSLConnectionSocketFactory(builder.build(), NoopHostnameVerifier.INSTANCE);
-				Registry<ConnectionSocketFactory> registry = RegistryBuilder.<ConnectionSocketFactory>create()
-						.register("http", new PlainConnectionSocketFactory())
-						.register("https", sslConnectionSocketFactory)
-						.build();
-
-				cm = new PoolingHttpClientConnectionManager(registry);
-				cm.setMaxTotal(100);
-				CloseableHttpClient httpclient = HttpClients.custom()
-						.setSSLSocketFactory(sslConnectionSocketFactory).setRedirectStrategy(new LaxRedirectStrategy())
-						.setConnectionManager(cm)
-						.build();
-
-				HttpComponentsClientHttpRequestFactory requestFactory =
-						new HttpComponentsClientHttpRequestFactory();
-
-				requestFactory.setHttpClient(httpclient);
-				restTemplate = new RestTemplate(requestFactory);
-				Map<String, String> params = new HashMap<>();
-				params.put("groupName", dto.getOrg_room_id());
-				response = restTemplate.postForEntity(megUrl+"faceGroups", params, String.class);
-			}
-		}catch (Exception e) {
-			lg.error("Occured in createGroups",e);
-		}
-		finally {
-			if(cm != null) {
-			cm.close();
-			}
-		}
-
-	}
+//	public void createGroups() throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+//		Integer orgId = 1;
+//		ResponseEntity response = null;
+//		PoolingHttpClientConnectionManager cm  = null;
+//		try { 
+//			List<RoomReqDto> dtoList = roomDao.getRoomMaster(orgId);
+//			for(RoomReqDto dto : dtoList) {
+//				SSLContextBuilder builder = new SSLContextBuilder();
+//				builder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
+//				SSLConnectionSocketFactory sslConnectionSocketFactory = new SSLConnectionSocketFactory(builder.build(), NoopHostnameVerifier.INSTANCE);
+//				Registry<ConnectionSocketFactory> registry = RegistryBuilder.<ConnectionSocketFactory>create()
+//						.register("http", new PlainConnectionSocketFactory())
+//						.register("https", sslConnectionSocketFactory)
+//						.build();
+//
+//				cm = new PoolingHttpClientConnectionManager(registry);
+//				cm.setMaxTotal(100);
+//				CloseableHttpClient httpclient = HttpClients.custom()
+//						.setSSLSocketFactory(sslConnectionSocketFactory).setRedirectStrategy(new LaxRedirectStrategy())
+//						.setConnectionManager(cm)
+//						.build();
+//
+//				HttpComponentsClientHttpRequestFactory requestFactory =
+//						new HttpComponentsClientHttpRequestFactory();
+//
+//				requestFactory.setHttpClient(httpclient);
+//				restTemplate = new RestTemplate(requestFactory);
+//				Map<String, String> params = new HashMap<>();
+//				params.put("groupName", dto.getOrg_room_id());
+//				response = restTemplate.postForEntity(megUrl+"faceGroups", params, String.class);
+//			}
+//		}catch (Exception e) {
+//			lg.error("Occured in createGroups",e);
+//		}
+//		finally {
+//			if(cm != null) {
+//			cm.close();
+//			}
+//		}
+//
+//	}
 	//ROOMID - CAMERA IP MODIFICATION
 //	public boolean bindingFaceWithFaceGroups(Map<String,AttendanceReqestModel> StudentDetails, String megboxIp){
 //		lg.info("Inside group creation");
@@ -908,10 +916,8 @@ public class MegBoxAttendanceService {
 
 	    lg.info("Inside group creation");
 	    boolean isBinded = false;
-	    PoolingHttpClientConnectionManager cm = null;
 
-	    // ← CHANGED: track no-photo students
-	    //   (no longer for FCM, now for 300 status)
+	    // track no-photo students (status 300)
 	    List<String> noPhotoStudentIds = new ArrayList<>();
 
 	    try {
@@ -935,86 +941,29 @@ public class MegBoxAttendanceService {
 	                    if (!hasToken) {
 	                        lg.warn("No face token for " +
 	                                "student: {}", studentId);
-
-	                        // ← NEW: save 300 in attendance_data
-	                        // instead of FCM notification!
 	                        noPhotoStudentIds.add(studentId);
 	                        continue;
 	                    }
 
-	                    // Existing binding code unchanged
-	                    if (studentTokenDetails.get(studentId)
-	                            != null
-	                            && studentTokenDetails
-	                            .containsKey(studentId)) {
+	                    String[] faceGroupList = new String[1];
+	                    faceGroupList[0] = dto.getValue().getGroupName();
+	                    Map<String, String[]> params = new HashMap<>();
+	                    params.put("faceGroupList", faceGroupList);
 
-	                        SSLContextBuilder builder =
-	                                new SSLContextBuilder();
-	                        builder.loadTrustMaterial(
-	                                null,
-	                                new TrustSelfSignedStrategy());
-	                        SSLConnectionSocketFactory
-	                                sslConnectionSocketFactory =
-	                                new SSLConnectionSocketFactory(
-	                                        builder.build(),
-	                                        NoopHostnameVerifier
-	                                            .INSTANCE);
-	                        Registry<ConnectionSocketFactory>
-	                                registry =
-	                                RegistryBuilder
-	                                .<ConnectionSocketFactory>
-	                                create()
-	                                .register("http",
-	                                    new PlainConnectionSocketFactory())
-	                                .register("https",
-	                                    sslConnectionSocketFactory)
-	                                .build();
+	                    // FIX 3: reuse the shared client (megBoxBindingTemplate)
+	                    // instead of building a new client per student
+	                    ResponseEntity<String> response =
+	                            megBoxBindingTemplate.postForEntity(
+	                                    megBoxProtocal +
+	                                    dto.getValue().getMegBoxIp() +
+	                                    megBoxUri +
+	                                    "faceGroups/binding/" +
+	                                    studentTokenDetails.get(studentId),
+	                                    params,
+	                                    String.class);
 
-	                        cm = new PoolingHttpClientConnectionManager(
-	                                registry);
-	                        cm.setMaxTotal(100);
-	                        CloseableHttpClient httpclient =
-	                                HttpClients.custom()
-	                                .setSSLSocketFactory(
-	                                    sslConnectionSocketFactory)
-	                                .setRedirectStrategy(
-	                                    new LaxRedirectStrategy())
-	                                .setConnectionManager(cm)
-	                                .build();
-
-	                        HttpComponentsClientHttpRequestFactory
-	                                requestFactory =
-	                                new HttpComponentsClientHttpRequestFactory();
-	                        requestFactory.setHttpClient(
-	                                httpclient);
-	                        restTemplate = new RestTemplate(
-	                                requestFactory);
-
-	                        String[] faceGroupList =
-	                                new String[1];
-	                        faceGroupList[0] = dto.getValue().getGroupName();
-	                        Map<String, String[]> params =
-	                                new HashMap<>();
-	                        params.put("faceGroupList",
-	                                faceGroupList);
-
-	                        ResponseEntity<String> response =
-	                                restTemplate.postForEntity(
-	                                megBoxProtocal +
-	                                dto.getValue().getMegBoxIp() +
-	                                megBoxUri +
-	                                "faceGroups/binding/" +
-	                                studentTokenDetails
-	                                    .get(studentId),
-	                                params,
-	                                String.class);
-
-	                        if (response.getStatusCode()
-	                                .equals(STATUS_CODE_200)
-	                                || response.getStatusCode()
-	                                .equals(STATUS_CODE_201)) {
-	                            isBinded = true;
-	                        }
+	                    if (response.getStatusCode().is2xxSuccessful()) {
+	                        isBinded = true;
 	                    }
 
 	                } catch (Exception e) {
@@ -1024,8 +973,7 @@ public class MegBoxAttendanceService {
 	                }
 	            }
 
-	            // ← NEW: Update no-photo students to 300
-	            //   (instead of FCM notification!)
+	            // Update no-photo students to 300
 	            if (!noPhotoStudentIds.isEmpty()) {
 	                lg.warn("Students with no photo (300): {}",
 	                        noPhotoStudentIds);
@@ -1036,15 +984,59 @@ public class MegBoxAttendanceService {
 
 	    } catch (Exception e) {
 	        lg.error("Error in bindingFaceWithFaceGroups", e);
-	    } finally {
-	        if (cm != null) {
-	            cm.close();
-	        }
 	    }
 
 	    lg.info("End of group creation");
 	    return isBinded;
 	}
+	@PostConstruct
+	public void initMegBoxClient() throws Exception {
+	    SSLContextBuilder builder = new SSLContextBuilder();
+	    builder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
+	    SSLConnectionSocketFactory sslFactory =
+	            new SSLConnectionSocketFactory(
+	                    builder.build(), NoopHostnameVerifier.INSTANCE);
+
+	    Registry<ConnectionSocketFactory> registry =
+	            RegistryBuilder.<ConnectionSocketFactory>create()
+	                    .register("http", new PlainConnectionSocketFactory())
+	                    .register("https", sslFactory)
+	                    .build();
+
+	    PoolingHttpClientConnectionManager pool =
+	            new PoolingHttpClientConnectionManager(registry);
+	    pool.setMaxTotal(200);
+	    pool.setDefaultMaxPerRoute(50);
+
+	    RequestConfig config = RequestConfig.custom()
+	            .setConnectTimeout(10 * 1000)
+	            .setConnectionRequestTimeout(10 * 1000)
+	            .setSocketTimeout(30 * 1000)
+	            .build();
+
+	    megBoxHttpClient = HttpClients.custom()
+	            .setSSLSocketFactory(sslFactory)
+	            .setConnectionManager(pool)
+	            .setDefaultRequestConfig(config)
+	            .setRedirectStrategy(new LaxRedirectStrategy())
+	            .build();
+
+	    HttpComponentsClientHttpRequestFactory factory =
+	            new HttpComponentsClientHttpRequestFactory(megBoxHttpClient);
+	    megBoxBindingTemplate = new RestTemplate(factory);
+	}
+
+	@PreDestroy
+	public void closeMegBoxClient() {
+	    try {
+	        if (megBoxHttpClient != null) {
+	            megBoxHttpClient.close();
+	        }
+	    } catch (IOException e) {
+	        lg.error("Error closing MegBox client", e);
+	    }
+	}
+	
 	@SuppressWarnings("all")
 	public void convertCSVFile(List<AttendanceReqestModel> attendanceReqList, Map<String,String> cameraCapturedStudentMap) throws ParseException {
 		
@@ -1198,18 +1190,18 @@ public class MegBoxAttendanceService {
 //	}
 	
 	// RoomId <-> CAMERAIP Modification
-	public String getRecongnizedStudent(StudentAttendance studentAttendance) {
-		try {
-			Map<String,AttendanceReqestModel> map = convertStudentReqDetailsToMap(studentAttendance);
-			bindingFaceWithFaceGroups(map, studentAttendance.getMegBoxIp());
-		}catch (Exception e) {
-			e.printStackTrace();			
-		}
-		String genaretedValue = 
-			    studentAttendance.getCameraIp() + "@" +  // ← NEW
-			    studentAttendance.getSubjectId();
-		return genaretedValue;
-	}
+//	public String getRecongnizedStudent(StudentAttendance studentAttendance) {
+//		try {
+//			Map<String,AttendanceReqestModel> map = convertStudentReqDetailsToMap(studentAttendance);
+//			bindingFaceWithFaceGroups(map, studentAttendance.getMegBoxIp());
+//		}catch (Exception e) {
+//			e.printStackTrace();			
+//		}
+//		String genaretedValue = 
+//			    studentAttendance.getCameraIp() + "@" +  // ← NEW
+//			    studentAttendance.getSubjectId();
+//		return genaretedValue;
+//	}
 	
 //	private Map<String, AttendanceReqestModel> convertStudentReqDetailsToMap(StudentAttendance studentAttendance) {
 //		Map<String,AttendanceReqestModel> map = new HashMap<>();
@@ -1264,117 +1256,117 @@ public class MegBoxAttendanceService {
 //	}
 	
 	
-	private Map<String, AttendanceReqestModel> 
-    convertStudentReqDetailsToMap(
-            StudentAttendance studentAttendance) {
-
-Map<String,AttendanceReqestModel> map = 
-        new HashMap<>();
-List<AttendanceReqestModel> attendanceReqList = 
-        new ArrayList<>();
-SimpleDateFormat dateFormat = 
-        new SimpleDateFormat("dd/MM/yyyy");
-
-for(StudentAttendanceResponse details : 
-        studentAttendance
-        .getStudentAttendanceDetails()) {
-
-    AttendanceReqestModel model = 
-            new AttendanceReqestModel();
-    model.setClassName(
-            studentAttendance.getClassName());
-    model.setEndTime(
-            studentAttendance.getEndTime());
-    model.setPeriodName(
-            studentAttendance.getPeriodName());
-    model.setRoomId(
-            studentAttendance.getRoomId());
-    model.setCameraIp(
-            studentAttendance.getCameraIp()); // ← NEW
-    model.setStartTime(
-            studentAttendance.getStartTime());
-    model.setSubId(String.valueOf(
-            studentAttendance.getSubjectId()));
-    model.setSubName(
-            studentAttendance.getSubName());
-    model.setTeacherId(
-            studentAttendance.getTeacherId());
-    model.setTeacherName(
-            studentAttendance.getTeacherName());
-    model.setClassId(
-            studentAttendance.getClassId());
-    model.setIsRecongStudent("200");
-    model.setStartDate(
-            dateFormat.format(new Date()));
-    model.setEndDate(
-            dateFormat.format(new Date()));
-    model.setPeriodId(
-            studentAttendance.getPeriodId());
-    model.setMegBoxIp(
-            studentAttendance.getMegBoxIp());
-    model.setToken(
-            studentAttendance.getToken());
-    model.setStudentId(String.valueOf(
-            details.getStudentId()));
-    model.setStudentName(
-            details.getStudentName());
-    model.setRegNo(details.getRegNo());
-    model.setIs_on_leave(
-            details.getIs_on_leave());
-    model.setIs_cocurricular_leave(
-            CollectionUtils.isEmpty(
-                details.getIs_cocurricular_leave())
-            ? ""
-            : details.getIs_cocurricular_leave()
-                     .get(0));
-    model.setActivityId(
-            studentAttendance.getActivityId());
-    model.setAttDate(
-            studentAttendance.getAttDate());
-    model.setAttId(
-            studentAttendance.getAttId());
-    model.setAttTypeId(
-            studentAttendance.getAttTypeId());
-    model.setBatchId(
-            studentAttendance.getBatchId());
-    model.setDateandtime(
-            studentAttendance.getDateandtime());
-    model.setHoursheld(
-            studentAttendance.getHoursheld());
-    model.setIsTT(studentAttendance.getIsTT());
-    model.setRemarks(
-            studentAttendance.getRemarks());
-    model.setSubstitueClass(
-            studentAttendance.getSubstitueClass());
-    model.setTotalHours(
-            studentAttendance.getTotalHours());
-    model.setUserId(
-            studentAttendance.getUserId());
-    model.setVersion(
-            studentAttendance.getVersion());
-    model.setWorkDiaryAcademicYear(
-            studentAttendance
-                .getWorkDiaryAcademicYear());
-    model.setWorkDiaryActivityId(
-            studentAttendance
-                .getWorkDiaryActivityId());
-
-    attendanceReqList.add(model);
-
-    // ✅ map key uses cameraIp
-    map.put(
-        model.getStudentId() + "-" +
-        studentAttendance.getCameraIp(),
-        model);
-}
-
-if(!attendanceReqList.isEmpty()) {
-    dao.saveAttendance(
-            attendanceReqList,
-            attendanceReqList.size());
-}
-return map;
-}
+//	private Map<String, AttendanceReqestModel> 
+//    convertStudentReqDetailsToMap(
+//            StudentAttendance studentAttendance) {
+//
+//Map<String,AttendanceReqestModel> map = 
+//        new HashMap<>();
+//List<AttendanceReqestModel> attendanceReqList = 
+//        new ArrayList<>();
+//SimpleDateFormat dateFormat = 
+//        new SimpleDateFormat("dd/MM/yyyy");
+//
+//for(StudentAttendanceResponse details : 
+//        studentAttendance
+//        .getStudentAttendanceDetails()) {
+//
+//    AttendanceReqestModel model = 
+//            new AttendanceReqestModel();
+//    model.setClassName(
+//            studentAttendance.getClassName());
+//    model.setEndTime(
+//            studentAttendance.getEndTime());
+//    model.setPeriodName(
+//            studentAttendance.getPeriodName());
+//    model.setRoomId(
+//            studentAttendance.getRoomId());
+//    model.setCameraIp(
+//            studentAttendance.getCameraIp()); // ← NEW
+//    model.setStartTime(
+//            studentAttendance.getStartTime());
+//    model.setSubId(String.valueOf(
+//            studentAttendance.getSubjectId()));
+//    model.setSubName(
+//            studentAttendance.getSubName());
+//    model.setTeacherId(
+//            studentAttendance.getTeacherId());
+//    model.setTeacherName(
+//            studentAttendance.getTeacherName());
+//    model.setClassId(
+//            studentAttendance.getClassId());
+//    model.setIsRecongStudent("200");
+//    model.setStartDate(
+//            dateFormat.format(new Date()));
+//    model.setEndDate(
+//            dateFormat.format(new Date()));
+//    model.setPeriodId(
+//            studentAttendance.getPeriodId());
+//    model.setMegBoxIp(
+//            studentAttendance.getMegBoxIp());
+//    model.setToken(
+//            studentAttendance.getToken());
+//    model.setStudentId(String.valueOf(
+//            details.getStudentId()));
+//    model.setStudentName(
+//            details.getStudentName());
+//    model.setRegNo(details.getRegNo());
+//    model.setIs_on_leave(
+//            details.getIs_on_leave());
+//    model.setIs_cocurricular_leave(
+//            CollectionUtils.isEmpty(
+//                details.getIs_cocurricular_leave())
+//            ? ""
+//            : details.getIs_cocurricular_leave()
+//                     .get(0));
+//    model.setActivityId(
+//            studentAttendance.getActivityId());
+//    model.setAttDate(
+//            studentAttendance.getAttDate());
+//    model.setAttId(
+//            studentAttendance.getAttId());
+//    model.setAttTypeId(
+//            studentAttendance.getAttTypeId());
+//    model.setBatchId(
+//            studentAttendance.getBatchId());
+//    model.setDateandtime(
+//            studentAttendance.getDateandtime());
+//    model.setHoursheld(
+//            studentAttendance.getHoursheld());
+//    model.setIsTT(studentAttendance.getIsTT());
+//    model.setRemarks(
+//            studentAttendance.getRemarks());
+//    model.setSubstitueClass(
+//            studentAttendance.getSubstitueClass());
+//    model.setTotalHours(
+//            studentAttendance.getTotalHours());
+//    model.setUserId(
+//            studentAttendance.getUserId());
+//    model.setVersion(
+//            studentAttendance.getVersion());
+//    model.setWorkDiaryAcademicYear(
+//            studentAttendance
+//                .getWorkDiaryAcademicYear());
+//    model.setWorkDiaryActivityId(
+//            studentAttendance
+//                .getWorkDiaryActivityId());
+//
+//    attendanceReqList.add(model);
+//
+//    // ✅ map key uses cameraIp
+//    map.put(
+//        model.getStudentId() + "-" +
+//        studentAttendance.getCameraIp(),
+//        model);
+//}
+//
+//if(!attendanceReqList.isEmpty()) {
+//    dao.saveAttendance(
+//            attendanceReqList,
+//            attendanceReqList.size());
+//}
+//return map;
+//}
 	public void getTeacherMarkedStudentDetails(StudentApkDtoResponse studentApkDtoResponse) {
 		new Thread(new Runnable()
 		{
@@ -1424,8 +1416,7 @@ return map;
             for (Video video : multiAlgVideosResponseModel.getData().getVideos()) {
                 String camIP = CameraUtils.extractIPAddress(video.getUrl());
 
-                if (camIP != null && !camIP.isEmpty()) {
-                    // Extract group names using Stream API
+                if (camIP != null && !camIP.isEmpty()) {                    // Extract group names using Stream API
                     List<String> groupNames = video.getAlgRules().stream()
                         .filter(ar -> ar.getStructuresRule() != null && ar.getStructuresRule().getGroup() != null)
                         .flatMap(ar -> ar.getStructuresRule().getGroup().stream())
@@ -1670,87 +1661,87 @@ return map;
 		    return tempFile;
 		}
 		public String getRecongnizedStudentDetails(
-		        StudentAttendance studentAttendance) {
+		        StudentAttendance studentAttendance,
+		        String submittedAt) {
+
 		    try {
 		        Map<String, AttendanceReqestModel> map =
-		                convertStuReqDetailsToMap(studentAttendance);
+		                convertStuReqDetailsToMap(
+		                        studentAttendance, submittedAt);
 		        bindingFaceWithFaceGroups(
 		                map,
 		                studentAttendance.getMegBoxIp());
 		    } catch (Exception e) {
-		        e.printStackTrace();
+		        lg.error("Error in getRecongnizedStudentDetails", e);
 		    }
-	
-		    // ← NEW: cameraIp@startTime (no subjectId!)
+
+		    // jobId: cameraIpAddress@submittedAt
 		    String generatedValue =
-		            studentAttendance.getCameraIp() +
+		            studentAttendance.getCameraIpAddress() +
 		            "@" +
-		            studentAttendance.getStartTime();
-	
+		            submittedAt;
+
 		    return generatedValue;
 		}
-			private Map<String, AttendanceReqestModel>
-		    convertStuReqDetailsToMap(
-		            StudentAttendance studentAttendance) {
-		
-		Map<String, AttendanceReqestModel> map = new HashMap<>();
-		List<AttendanceReqestModel> attendanceReqList =
-		        new ArrayList<>();
-		SimpleDateFormat dateFormat =
-		        new SimpleDateFormat("dd/MM/yyyy");
-		String cameraIp = studentAttendance.getCameraIp();
+		private Map<String, AttendanceReqestModel>
+        convertStuReqDetailsToMap(
+                StudentAttendance studentAttendance,
+                String submittedAt) {
 
-	    // ← NEW: strip dots → MegBox group name
-	    // "192.168.9.41" → "192168941"
-	    String groupName = (cameraIp != null)
-	            ? cameraIp.replace(".", "")
-	            : "";
+    Map<String, AttendanceReqestModel> map = new HashMap<>();
+    List<AttendanceReqestModel> attendanceReqList =
+            new ArrayList<>();
+    SimpleDateFormat dateFormat =
+            new SimpleDateFormat("dd/MM/yyyy");
 
-		
-		for (StudentAttendanceResponse details :
-		        studentAttendance.getStudentAttendanceDetails()) {
-		
-		    AttendanceReqestModel model =
-		            new AttendanceReqestModel();
-		
-		    model.setStartTime(studentAttendance.getStartTime());
-		    model.setEndTime(studentAttendance.getEndTime());
-		    model.setStartDate(dateFormat.format(new Date()));
-		    model.setEndDate(dateFormat.format(new Date()));
-		    model.setCameraIp(studentAttendance.getCameraIp());
-		    model.setMegBoxIp(studentAttendance.getMegBoxIp());
-		    model.setToken(studentAttendance.getToken());
-		    model.setIsRecongStudent("200");
-		    model.setDateandtime(
-		    	    studentAttendance.getDateandtime());
-		
-		    // ← UUID as studentId
-		    model.setStudentId(details.getStudentId());
-		
-		    // ← studentName if available
-		    model.setStudentName(details.getStudentName());
-		
-		    // ← regNo = UUID (since regNo replaced by UUID)
-		    model.setRegNo(details.getStudentId());
-		    model.setGroupName(groupName);
+    String cameraIp = studentAttendance.getCameraIpAddress();
 
-		
-		    attendanceReqList.add(model);
-		
-		    // ← map key: UUID-cameraIp
-		    map.put(
-		            details.getStudentId() + "|" + groupName,  // ← CHANGED: use groupName in key
-		            model);
-		    }
-		
-		if (!attendanceReqList.isEmpty()) {
-		    dao.saveAttendanceNew(
-		            attendanceReqList,
-		            attendanceReqList.size());
-		}
-		
-		return map;
-		}
+    // strip dots → MegBox group name
+    // "192.168.9.41" → "192168941"
+    String groupName = (cameraIp != null)
+            ? cameraIp.replace(".", "")
+            : "";
+
+    List<String> uuidList = studentAttendance.getUuidList();
+
+    if (uuidList != null) {
+        for (String studentId : uuidList) {
+
+            AttendanceReqestModel model =
+                    new AttendanceReqestModel();
+
+            // ← submittedAt now covers what start_time/
+            // end_time/dateandtime used to carry
+            model.setStartTime(submittedAt);
+            model.setEndTime(null);
+            model.setStartDate(dateFormat.format(new Date()));
+            model.setEndDate(dateFormat.format(new Date()));
+            model.setCameraIp(cameraIp);
+            model.setMegBoxIp(studentAttendance.getMegBoxIp());
+            model.setToken(studentAttendance.getToken());
+            model.setIsRecongStudent("200");
+            model.setDateandtime(submittedAt);
+
+            // uuid IS the studentId now
+            model.setStudentId(studentId);
+            model.setStudentName(null);   // no longer sent by Christ
+            model.setRegNo(studentId);    // regNo = uuid, same as before
+            model.setGroupName(groupName);
+
+            attendanceReqList.add(model);
+
+            map.put(studentId + "|" + groupName, model);
+        }
+    }
+
+    if (!attendanceReqList.isEmpty()) {
+        dao.saveAttendanceNew(
+                attendanceReqList,
+                attendanceReqList.size());
+    }
+
+    return map;
+}
 			private void convertOnDemandUploadCSV(
 			        OnDemandUploadResponse response) {
 

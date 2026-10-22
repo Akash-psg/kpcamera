@@ -10,6 +10,22 @@ public class AlertsEvent {
 	private Top1 top1;
 	private String captureFullImageURL;
 	private String channelName;
+	
+	@JsonProperty("trackId")
+	private String trackId;
+	@JsonProperty("timestamp")
+	private String timestamp;
+	@JsonProperty("captureImageURL")
+	private String captureImageURL;
+
+	public String getTrackId() { return trackId; }
+	public void setTrackId(String trackId) { this.trackId = trackId; }
+
+	public String getTimestamp() { return timestamp; }
+	public void setTimestamp(String timestamp) { this.timestamp = timestamp; }
+
+	public String getCaptureImageURL() { return captureImageURL; }
+	public void setCaptureImageURL(String captureImageURL) { this.captureImageURL = captureImageURL; }
 
 	public Top1 getTop1() {
 		return top1;

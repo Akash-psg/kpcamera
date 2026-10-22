@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# IDE and build output
+sts-5.1.1.RELEASE/
+.metadata/
+Servers/
+target/

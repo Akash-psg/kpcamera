@@ -18,21 +18,15 @@ import com.iolite.kpcamera.attendance.mapper.GetRoomDetailsMapper;
 import com.iolite.kpcamera.attendance.mapper.RoomAndRoomDetailsMapper;
 import com.iolite.kpcamera.attendance.mapper.RoomAndRoomDetailsMapperDto;
 import com.iolite.kpcamera.attendance.mapper.RoomDetailsMapper;
-import com.iolite.kpcamera.attendance.mapper.RoomMapper;
 import com.iolite.kpcamera.attendance.model.RoomIpInbound;
-import com.iolite.kpcamera.attendance.model.RoomReqDto;
 import com.iolite.kpcamera.attendance.model.outbound.RoomIpOutbound;
 import com.iolite.kpcamera.attendance.model.responses.RoomResDataDto;
 import com.iolite.kpcamera.attendance.model.responses.RoomResDto;
-import com.iolite.kpcamera.attendance.service.MegBoxAttendanceService;
+
 
 @Repository
 public class RoomDaoImpl implements RoomDao{
 	
-	
-	@Autowired
-	@Qualifier("cristMysoreJDBC")
-	private JdbcTemplate cristMysoreJDBC;
 	
 	@Autowired
 	@Qualifier("middleWareJDBC")
@@ -40,8 +34,6 @@ public class RoomDaoImpl implements RoomDao{
 	
 	static final Logger lg = LoggerFactory.getLogger(RoomDaoImpl.class);
 
-	private static final String QUERY = "select * from room_master where is_active = 1";
-	
 	private static final String INSERT_QUERY_FOR_ROOM = "INSERT INTO group_data(box_ip, discription, is_active) VALUES (?, ?, ?)";
     private static final String INSERT_QUERY_FOR_ROOM_DETAILS = "INSERT INTO group_details(group_name, update_by, update_date, modified_by, modified_date, is_active, floor, camera_ip, room_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
@@ -76,10 +68,6 @@ public class RoomDaoImpl implements RoomDao{
 	
 	private static final String DELETE_GROUP_DETAILS = "delete from group_details where room_id = ?";
 	
-	@Override
-	public List<RoomReqDto> getRoomMaster(int id) throws Exception {
-		return cristMysoreJDBC.query(QUERY, new RoomMapper());
-	}
 	@Override
 	public void saveRoom(RoomResDto roomResDto, int id, String orgLocId, String org_facility_id) {
 		middleWareJDBC.update(INSERT_QUERY, roomResDto.getData().getOrg_room_id(),

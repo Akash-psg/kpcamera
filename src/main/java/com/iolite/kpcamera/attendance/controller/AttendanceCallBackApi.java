@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -308,117 +309,138 @@ public class AttendanceCallBackApi {
 	    return null;
 	}
 	@PostMapping(
-		    path = "/submitAIAttendanceData",
-		    consumes = "application/json",
-		    produces = "application/json")
-		public SubmitAttendanceResponse submitAIAttendanceData(
-		        @RequestBody StudentAttendance studentAttendance) {
+	        path = "/submitAIAttendanceData",
+	        consumes = "application/json",
+	        produces = "application/json")
+	public SubmitAttendanceResponse submitAIAttendanceData(
+	        @RequestBody StudentAttendance studentAttendance) {
 
-		    SubmitAttendanceResponse response =
-		            new SubmitAttendanceResponse();
+	    SubmitAttendanceResponse response = new SubmitAttendanceResponse();
 
-		    try {
-		        SimpleDateFormat sdf =
-		                new SimpleDateFormat("dd/MM/yyyy");
-		        String startDate = sdf.format(new Date());
+	    try {
+	        // ═══════════════════════════════════════
+	        // STEP 1: CAPTURE SUBMISSION TIME (server-side)
+	        // Christ no longer sends startTime/endTime/dateandtime.
+	        // We timestamp receipt ourselves — this becomes the
+	        // single "submittedAt" used for the jobId, the 20-min
+	        // capture window, and the DB start_time/date_and_time.
+	        // ═══════════════════════════════════════
+	        SimpleDateFormat submittedFormat =
+	                new SimpleDateFormat("yyyy:MM:dd HH:mm:ss");
+	        SimpleDateFormat dateOnlyFormat =
+	                new SimpleDateFormat("dd/MM/yyyy");
+	        Date now = new Date();
+	        String submittedAt = submittedFormat.format(now);
+	        String startDate = dateOnlyFormat.format(now);
 
-		        // ═══════════════════════════════════════
-		        // STEP 1: READ INPUT VALUES
-		        // ═══════════════════════════════════════
-		        String cameraIp = studentAttendance.getCameraIp();
-		        String megBoxIp = studentAttendance.getMegBoxIp();
+	        // ═══════════════════════════════════════
+	        // STEP 2: READ + VALIDATE INPUT
+	        // ═══════════════════════════════════════
+	        String cameraIp = studentAttendance.getCameraIpAddress();
+	        String megBoxIp = studentAttendance.getMegBoxIp();
 
-		        lg.info("submitAIAttendanceData: " +
-		                "cameraIp={}, megBoxIp={}",
-		                cameraIp, megBoxIp);
+	        lg.info("submitAIAttendanceData: cameraIpAddress={}, " +
+	                "megBoxIp={}, submittedAt={}",
+	                cameraIp, megBoxIp, submittedAt);
 
-		        // ═══════════════════════════════════════
-		        // STEP 2: RESOLVE MEGBOX IP IF NOT SENT
-		        // ═══════════════════════════════════════
-		        if (megBoxIp == null ||
-		                megBoxIp.trim().isEmpty()) {
+	        if (cameraIp == null || cameraIp.trim().isEmpty()) {
+	            response.setStatus("FAILED");
+	            response.setMessage("cameraIpAddress is required");
+	            return response;
+	        }
 
-		            lg.info("MegBox IP not in payload, " +
-		                    "resolving from DB for camera: {}",
-		                    cameraIp);
+	        if (CollectionUtils.isEmpty(studentAttendance.getUuidList())) {
+	            response.setStatus("FAILED");
+	            response.setMessage("uuidList is required and cannot be empty");
+	            return response;
+	        }
 
-		            megBoxIp = roomIpService
-		                    .getMegBoxIpByCameraIp(cameraIp);
+	        // ═══════════════════════════════════════
+	        // STEP 3: RESOLVE MEGBOX IP IF NOT SENT
+	        // ═══════════════════════════════════════
+	        if (megBoxIp == null || megBoxIp.trim().isEmpty()) {
 
-		            if (megBoxIp == null ||
-		                    megBoxIp.trim().isEmpty()) {
-		                lg.error("MegBox IP not found " +
-		                         "for camera: {}", cameraIp);
-		                response.setStatus("FAILED");
-		                response.setMessage(
-		                    "MegBox IP not found " +
-		                    "for Camera IP: " + cameraIp);
-		                return response;
-		            }
+	            lg.info("MegBox IP not in payload, resolving from " +
+	                    "DB for camera: {}", cameraIp);
 
-		            lg.info("Resolved MegBox IP: {} " +
-		                    "for camera: {}",
-		                    megBoxIp, cameraIp);
+	            megBoxIp = roomIpService.getMegBoxIpByCameraIp(cameraIp);
 
-		            // Update request object
-		            // so all downstream methods get correct IP
-		            studentAttendance.setMegBoxIp(megBoxIp);
-		        }
+	            if (megBoxIp == null || megBoxIp.trim().isEmpty()) {
+	                lg.error("MegBox IP not found for camera: {}", cameraIp);
+	                response.setStatus("FAILED");
+	                response.setMessage(
+	                    "MegBox IP not found for Camera IP: " + cameraIp);
+	                return response;
+	            }
 
-		        // ═══════════════════════════════════════
-		        // STEP 3: VALIDATE MEGBOX + CAMERA
-		        // ═══════════════════════════════════════
-		        String message = validateAndUpdateGroupDetailsByCamIP(
-		                megBoxIp, cameraIp);
+	            lg.info("Resolved MegBox IP: {} for camera: {}",
+	                    megBoxIp, cameraIp);
 
-		        if (message != null && !message.isEmpty()) {
-		            response.setStatus("FAILED");
-		            response.setMessage(message);
-		            return response;
-		        }
+	            studentAttendance.setMegBoxIp(megBoxIp);
+	        }
 
-		        // ═══════════════════════════════════════
-		        // STEP 4: DUPLICATE CHECK
-		        // ═══════════════════════════════════════
-		        List<StudentApkDtoResponse> daoList =
-		                dao.getStudentAttendanceByCamAndTime(
-		                        cameraIp,
-		                        studentAttendance.getStartTime(),
-		                        startDate);
+	        // ═══════════════════════════════════════
+	        // STEP 4: VALIDATE MEGBOX + CAMERA
+	        // ═══════════════════════════════════════
+	        String message = validateAndUpdateGroupDetailsByCamIP(
+	                megBoxIp, cameraIp);
 
-		        if (CollectionUtils.isNotEmpty(daoList)) {
-		            response.setStatus("DUPLICATE");
-		            response.setMessage(
-		                "The Period Attendance is " +
-		                "already taken or Inprogress");
-		            return response;
-		        }
+	        if (message != null && !message.isEmpty()) {
+	            response.setStatus("FAILED");
+	            response.setMessage(message);
+	            return response;
+	        }
 
-		        // ═══════════════════════════════════════
-		        // STEP 5: PROCESS ATTENDANCE
-		        // ═══════════════════════════════════════
-		        String jobId = services
-		                .getRecongnizedStudentDetails(
-		                        studentAttendance);
-		        // studentAttendance.getMegBoxIp() now
-		        // returns resolved megBoxIp ✅
+	        // ═══════════════════════════════════════
+	        // STEP 5: IN-PROGRESS CHECK
+	        // No client-supplied startTime to match exactly anymore,
+	        // so instead: is this camera's most recent session today
+	        // still inside its 20-minute capture window?
+	        // ═══════════════════════════════════════
+	        List<StudentApkDtoResponse> lastSession =
+	                dao.getLatestSessionForCamera(cameraIp, startDate);
 
-		        response.setStatus("SUCCESS");
-		        response.setJobId(jobId);
-		        response.setMessage(
-		            "Attendance submitted successfully");
+	        if (CollectionUtils.isNotEmpty(lastSession)) {
+	            StudentApkDtoResponse last = lastSession.get(0);
+	            try {
+	                Date lastSubmittedAt =
+	                        submittedFormat.parse(last.getDateandtime());
+	                Date windowEnd = new Date(
+	                        lastSubmittedAt.getTime() + 20 * 60 * 1000L);
 
-		    } catch (Exception e) {
-		        lg.error("Error submitAIAttendanceData", e);
-		        response.setStatus("ERROR");
-		        response.setMessage(
-		            "Unexpected error: " + e.getMessage());
-		    }
+	                if (now.before(windowEnd)) {
+	                    response.setStatus("IN_PROGRESS");
+	                    response.setMessage(
+	                        "Attendance capture already in progress " +
+	                        "for Camera IP: " + cameraIp);
+	                    return response;
+	                }
+	            } catch (java.text.ParseException pe) {
+	                lg.warn("Could not parse last session timestamp " +
+	                        "'{}' for camera {} — allowing new submission",
+	                        last.getDateandtime(), cameraIp);
+	            }
+	        }
 
-		    lg.info("end submitAIAttendanceData: {}",
-		            response.getJobId());
-		    return response;
-		}
+	        // ═══════════════════════════════════════
+	        // STEP 6: PROCESS ATTENDANCE
+	        // ═══════════════════════════════════════
+	        String jobId = services.getRecongnizedStudentDetails(
+	                studentAttendance, submittedAt);
+
+	        response.setStatus("SUCCESS");
+	        response.setJobId(jobId);
+	        response.setMessage("Attendance submitted successfully");
+
+	    } catch (Exception e) {
+	        lg.error("Error submitAIAttendanceData", e);
+	        response.setStatus("ERROR");
+	        response.setMessage("Unexpected error: " + e.getMessage());
+	    }
+
+	    lg.info("end submitAIAttendanceData: {}", response.getJobId());
+	    return response;
+	}
 	@GetMapping("/triggerNotification")
 	public String triggerNotification() {
 	    try {
@@ -429,5 +451,56 @@ public class AttendanceCallBackApi {
 	        return "Error: " + e.getMessage();
 	    }
 	}
-	
+	@GetMapping(value = "/evidence", produces = MediaType.APPLICATION_JSON_VALUE)
+	public List<Map<String, Object>> getEvidence(
+	        @RequestParam("studentId") String studentId,
+	        @RequestParam("date") String date,                       // dd/MM/yyyy
+	        @RequestParam(value = "hour", required = false) Integer hour) {
+
+	    String hourLike = (hour == null) ? null
+	            : "% " + String.format("%02d", hour) + ":%";
+
+	    List<Map<String, Object>> rows =
+	            dao.getEvidenceForStudent(studentId, date, hourLike);
+
+	    List<Map<String, Object>> result = new ArrayList<>();
+	    SimpleDateFormat fmt = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss");
+
+	    for (Map<String, Object> r : rows) {
+	        String sessionTime = String.valueOf(r.get("date_and_time"));
+	        boolean hasCapture = r.get("capture_full_image_url") != null
+	                || r.get("capture_image_url") != null;
+
+	        String status;
+	        try {
+	            long end = fmt.parse(sessionTime).getTime() + 20 * 60 * 1000L;
+	            if (hasCapture) {
+	                status = "PRESENT";
+	            } else if ("300".equals(String.valueOf(r.get("is_recong_student")))) {
+	                status = "UNKNOWN";
+	            } else if (System.currentTimeMillis() < end) {
+	                status = "IN_PROGRESS";
+	            } else {
+	                status = "ABSENT";
+	            }
+	        } catch (Exception e) {
+	            status = hasCapture ? "PRESENT" : "ABSENT";
+	        }
+
+	        Map<String, Object> item = new LinkedHashMap<>();
+	        item.put("cameraIp", r.get("camera_ip"));
+	        item.put("sessionTime", sessionTime);
+	        item.put("status", status);
+	        if (hasCapture) {
+	            Map<String, Object> capture = new LinkedHashMap<>();
+	            capture.put("recognizedAt", r.get("recognized_at"));
+	            capture.put("score", r.get("search_score"));
+	            capture.put("faceImageUrl", r.get("capture_image_url"));
+	            capture.put("fullImageUrl", r.get("capture_full_image_url"));
+	            item.put("bestCapture", capture);
+	        }
+	        result.add(item);
+	    }
+	    return result;
+	}
 }

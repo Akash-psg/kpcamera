@@ -3,9 +3,11 @@ package com.iolite.kpcamera.attendance.dao.impl;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.joda.time.DateTime;
@@ -212,21 +214,16 @@ public class AttendanceDaoImpl implements AttendanceDao{
 	        getStudentAttendanceAndTokenBasedOnDate(
 	                String startDate) {
 
-	    DateTime dateTime = new DateTime();
-	    String startTimeFilterForHr =
-	            String.format("%02d",
-	                dateTime.getHourOfDay());
-	    String startTimeFilterForMint =
-	            String.format("%02d",
-	                dateTime.getMinuteOfHour()) + ":00";
-	    String completeStartTimeFilter =
-	            startTimeFilterForHr + ":" +
-	            startTimeFilterForMint;
+	    // ← CHANGED: removed the "between start_time and end_time"
+	    // filter — there's no client-supplied end_time anymore.
+	    // The scheduler's own 20-minute elapsed check (in
+	    // AttendanceServiceImpl.sendNotification) is now the only
+	    // gate for whether a session actually gets processed.
 
 	    String MIDDLEWARE_APK_STUDNET_QUERY =
 	            "select ANY_VALUE(id) AS id,\n" +
 	            "    ANY_VALUE(org_id) AS org_id,\n" +
-	            "    ANY_VALUE(room_id) AS room_id,\n" +   // ← FIXED: wrapped in ANY_VALUE
+	            "    ANY_VALUE(room_id) AS room_id,\n" +
 	            "    camera_ip,\n" +
 	            "    ANY_VALUE(period_id) AS period_id,\n" +
 	            "    ANY_VALUE(subject_id) AS subject_id,\n" +
@@ -264,16 +261,13 @@ public class AttendanceDaoImpl implements AttendanceDao{
 	            "    ANY_VALUE(total_ours) AS total_ours,\n" +
 	            "    ANY_VALUE(remarks) AS remarks " +
 	            "from attendance_data " +
-	            "where start_date = '" + startDate + "'" +
-	            " and '" + completeStartTimeFilter + "'" +
-	            " between start_time and end_time " +
+	            "where start_date = ? " +
 	            "group by start_time, camera_ip, token";
 
-	    List<StudentApkDtoResponse> list =
-	            middleWareJDBC.query(
-	                MIDDLEWARE_APK_STUDNET_QUERY,
-	                new StudentMiddlewareMapperForAPK());
-	    return list;
+	    return middleWareJDBC.query(
+	            MIDDLEWARE_APK_STUDNET_QUERY,
+	            new Object[]{startDate},
+	            new StudentMiddlewareMapperForAPK());
 	}
 	
 	@Override
@@ -426,5 +420,90 @@ public class AttendanceDaoImpl implements AttendanceDao{
 	        lg.error("Failed to save absent backup: {}",
 	                 e.getMessage());
 	    }
+	}
+	@Override
+	public List<StudentApkDtoResponse> getLatestSessionForCamera(
+	        String cameraIp, String startDate) {
+
+	    String QUERY =
+	            "select * from attendance_data " +
+	            "where camera_ip = ? " +
+	            "and start_date = ? " +
+	            "order by id desc limit 1";
+
+	    return middleWareJDBC.query(
+	            QUERY,
+	            new Object[]{cameraIp, startDate},
+	            new StudentMiddlewareMapperForAPK());
+	}
+	private static final String INSERT_CHRIST_DELIVERY_LOG =
+	        "INSERT INTO christ_delivery_log(" +
+	        "camera_ip, dateandtime, request_payload, " +
+	        "response_status, response_body) " +
+	        "VALUES (?, ?, ?, ?, ?)";
+
+	@Override
+	public void saveChristDeliveryLog(
+	        String cameraIp,
+	        String dateandtime,
+	        String requestPayload,
+	        String responseStatus,
+	        String responseBody) {
+	    try {
+	        middleWareJDBC.update(
+	                INSERT_CHRIST_DELIVERY_LOG,
+	                cameraIp,
+	                dateandtime,
+	                requestPayload,
+	                responseStatus,
+	                responseBody);
+	        lg.info("Christ delivery log saved for camera: {}, dateandtime: {}",
+	                cameraIp, dateandtime);
+	    } catch (Exception e) {
+	        lg.error("Failed to save Christ delivery log: {}", e.getMessage());
+	    }
+	}
+	
+	@Override
+	public void saveRecognitionEvidence(List<Object[]> rows) {
+	    if (rows == null || rows.isEmpty()) {
+	        return;
+	    }
+	    // Column order: student_id, camera_ip, session_date_time, recognized_at,
+	    // search_score, capture_image_url, capture_full_image_url, track_id
+	    middleWareJDBC.batchUpdate(
+	            "INSERT IGNORE INTO recognition_evidence(" +
+	            "student_id, camera_ip, session_date_time, recognized_at, " +
+	            "search_score, capture_image_url, capture_full_image_url, track_id) " +
+	            "VALUES (?,?,?,?,?,?,?,?)",
+	            rows);
+	}
+
+	@Override
+	public List<Map<String, Object>> getEvidenceForStudent(
+	        String studentId, String startDate, String hourLike) {
+
+	    StringBuilder sql = new StringBuilder(
+	            "SELECT a.camera_ip, a.date_and_time, a.is_recong_student, " +
+	            "e.recognized_at, e.search_score, e.capture_image_url, " +
+	            "e.capture_full_image_url, e.track_id " +
+	            "FROM attendance_data a " +
+	            "LEFT JOIN recognition_evidence e " +
+	            "ON e.student_id = a.student_id " +
+	            "AND e.camera_ip = a.camera_ip " +
+	            "AND e.session_date_time = a.date_and_time " +
+	            "WHERE a.student_id = ? AND a.start_date = ? ");
+
+	    List<Object> args = new ArrayList<>();
+	    args.add(studentId);
+	    args.add(startDate);
+
+	    if (hourLike != null) {
+	        sql.append("AND a.date_and_time LIKE ? ");
+	        args.add(hourLike);
+	    }
+	    sql.append("ORDER BY a.date_and_time");
+
+	    return middleWareJDBC.queryForList(sql.toString(), args.toArray());
 	}
 }

@@ -2,18 +2,13 @@ package com.iolite.kpcamera.attendance.model;
 
 import java.util.List;
 
-import com.iolite.kpcamera.attendance.model.responses.StudentAttendanceResponse;
-
 public class StudentAttendance {
 
-	
 	private Integer subjectId;
 	private String periodId;
 	private String teacherId;
 	private String roomId;
 	private Integer studentId;
-	private String startTime;
-	private String endTime;
 	private String classId;
 	private String teacherName;
 	private String className;
@@ -24,12 +19,11 @@ public class StudentAttendance {
 	private String token;
 	private String attDate;
 	private String hoursheld;
-	private String dateandtime;
 	private String attTypeId;
 	private String batchId;
 	private String activityId;
 	private String userId;
-	private String cameraIp;
+	private String cameraIpAddress;   // ← RENAMED from cameraIp
 	private String isTT;
 	private String version;
 	private String substitueClass;
@@ -39,7 +33,28 @@ public class StudentAttendance {
 	private String workDiaryAcademicYear;
 	private String attId;
 
-	private List<StudentAttendanceResponse> StudentAttendanceDetails;
+	// ← NEW: replaces studentAttendanceDetails
+	private List<String> uuidList;
+
+	// startTime, endTime, dateandtime REMOVED —
+	// server now captures submission time itself.
+	// StudentAttendanceDetails list REMOVED — replaced by uuidList.
+
+	public List<String> getUuidList() {
+		return uuidList;
+	}
+
+	public void setUuidList(List<String> uuidList) {
+		this.uuidList = uuidList;
+	}
+
+	public String getCameraIpAddress() {
+		return cameraIpAddress;
+	}
+
+	public void setCameraIpAddress(String cameraIpAddress) {
+		this.cameraIpAddress = cameraIpAddress;
+	}
 
 	public Integer getSubjectId() {
 		return subjectId;
@@ -81,34 +96,12 @@ public class StudentAttendance {
 		this.studentId = studentId;
 	}
 
-	public String getStartTime() {
-		return startTime;
-	}
-
-	public void setStartTime(String startTime) {
-		this.startTime = startTime;
-	}
-
-	public String getEndTime() {
-		return endTime;
-	}
-
-	public void setEndTime(String endTime) {
-		this.endTime = endTime;
-	}
-
 	public String getClassId() {
 		return classId;
 	}
 
 	public void setClassId(String classId) {
 		this.classId = classId;
-	}
-	public String getCameraIp() {
-	    return cameraIp;
-	}
-	public void setCameraIp(String cameraIp) {
-	    this.cameraIp = cameraIp;
 	}
 
 	public String getTeacherName() {
@@ -181,14 +174,6 @@ public class StudentAttendance {
 
 	public void setHoursheld(String hoursheld) {
 		this.hoursheld = hoursheld;
-	}
-
-	public String getDateandtime() {
-		return dateandtime;
-	}
-
-	public void setDateandtime(String dateandtime) {
-		this.dateandtime = dateandtime;
 	}
 
 	public String getAttTypeId() {
@@ -287,82 +272,10 @@ public class StudentAttendance {
 		this.attId = attId;
 	}
 
-	public List<StudentAttendanceResponse> getStudentAttendanceDetails() {
-		return StudentAttendanceDetails;
-	}
-
-	public void setStudentAttendanceDetails(List<StudentAttendanceResponse> studentAttendanceDetails) {
-		StudentAttendanceDetails = studentAttendanceDetails;
-	}
-
 	@Override
 	public String toString() {
-		StringBuilder builder = new StringBuilder();
-		builder.append("RecongnizedAttendanceRequestDto [subjectId=");
-		builder.append(subjectId);
-		builder.append(", periodId=");
-		builder.append(periodId);
-		builder.append(", teacherId=");
-		builder.append(teacherId);
-		builder.append(", roomId=");
-		builder.append(roomId);
-		builder.append(", studentId=");
-		builder.append(studentId);
-		builder.append(", startTime=");
-		builder.append(startTime);
-		builder.append(", endTime=");
-		builder.append(endTime);
-		builder.append(", classId=");
-		builder.append(classId);
-		builder.append(", teacherName=");
-		builder.append(teacherName);
-		builder.append(", className=");
-		builder.append(className);
-		builder.append(", periodName=");
-		builder.append(periodName);
-		builder.append(", subName=");
-		builder.append(subName);
-		builder.append(", floorNo=");
-		builder.append(floorNo);
-		builder.append(", megBoxIp=");
-		builder.append(megBoxIp);
-		builder.append(", token=");
-		builder.append(token);
-		builder.append(", attDate=");
-		builder.append(attDate);
-		builder.append(", hoursheld=");
-		builder.append(hoursheld);
-		builder.append(", dateandtime=");
-		builder.append(dateandtime);
-		builder.append(", attTypeId=");
-		builder.append(attTypeId);
-		builder.append(", batchId=");
-		builder.append(batchId);
-		builder.append(", activityId=");
-		builder.append(activityId);
-		builder.append(", userId=");
-		builder.append(userId);
-		builder.append(", isTT=");
-		builder.append(isTT);
-		builder.append(", version=");
-		builder.append(version);
-		builder.append(", substitueClass=");
-		builder.append(substitueClass);
-		builder.append(", workDiaryActivityId=");
-		builder.append(workDiaryActivityId);
-		builder.append(", totalHours=");
-		builder.append(totalHours);
-		builder.append(", remarks=");
-		builder.append(remarks);
-		builder.append(", workDiaryAcademicYear=");
-		builder.append(workDiaryAcademicYear);
-		builder.append(", attId=");
-		builder.append(attId);
-		builder.append(", StudentAttendanceDetails=");
-		builder.append(StudentAttendanceDetails);
-		builder.append("]");
-		return builder.toString();
+		return "StudentAttendance [cameraIpAddress=" + cameraIpAddress
+				+ ", megBoxIp=" + megBoxIp
+				+ ", uuidList=" + uuidList + "]";
 	}
-	
-	
 }

@@ -17,6 +17,16 @@ public class Top1 {
 	@JsonProperty("alertGroup")
 	private List<AlertGroup> alertGroup;
 	
+	@JsonProperty("searchScore")
+	private Double searchScore;
+
+	public Double getSearchScore() {
+	    return searchScore;
+	}
+	public void setSearchScore(Double searchScore) {
+	    this.searchScore = searchScore;
+	}
+	
 	public String getFaceToken() {
 		return faceToken;
 	}

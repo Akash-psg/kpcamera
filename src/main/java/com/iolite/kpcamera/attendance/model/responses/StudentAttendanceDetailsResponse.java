@@ -11,7 +11,6 @@ public class StudentAttendanceDetailsResponse {
 	private Integer subjectId;
 	private String periodId;
 	private String techerId;
-//	private Integer roomId;
 	 private String cameraIp;
 	private String classId;
 	private String teacherName;
